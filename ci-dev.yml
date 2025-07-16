@@ -1,11 +1,11 @@
-name: Deploy Fast-Paise
+name: Deploy nextjs-app
 
 on:
   push:
     branches:
       - main
       - dev
-      - aws
+      
 jobs:
   release:
     uses: ./.github/workflows/release.yml
