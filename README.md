@@ -1,18 +1,21 @@
-# 🚀 **Next.js App Deployment Notes (EC2 + Docker + ECR + NGINX + GitHub Actions)**
+# 🚀 **Next.js App Deployment Notes (EC2 + Docker + ECR + NGINX + GitHub Actions + Semantic Release)**
 
 ---
 
 ## 🖥️ **1. Launch EC2 Instance**
-- Choose Ubuntu 22.04 (or preferred).
-- Create and download a new `.pem` key pair.
-- Allow inbound rules for:
-  - SSH (22)
-  - HTTP (80)
-  - Custom App Port (e.g., 3000)
+
+* Choose Ubuntu 22.04 (or preferred).
+* Create and download a new `.pem` key pair.
+* Allow inbound rules for:
+
+  * SSH (22)
+  * HTTP (80)
+  * Custom App Port (e.g., 3000)
 
 ---
 
 ## 🐳 **2. Install Docker**
+
 ```bash
 sudo apt update
 sudo apt install -y docker.io
@@ -25,6 +28,7 @@ newgrp docker  # Or reboot the instance
 ---
 
 ## ☁️ **3. Install AWS CLI**
+
 ```bash
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 sudo apt install unzip
@@ -35,6 +39,7 @@ sudo ./aws/install
 ---
 
 ## 🌐 **4. Install and Configure NGINX**
+
 ```bash
 sudo apt update
 sudo apt install nginx -y
@@ -43,6 +48,7 @@ sudo nano /etc/nginx/sites-available/default
 ```
 
 **Paste this config** (change port if needed):
+
 ```nginx
 server {
     listen 80;
@@ -60,6 +66,7 @@ server {
 ```
 
 Then run:
+
 ```bash
 sudo nginx -t
 sudo systemctl restart nginx
@@ -70,6 +77,7 @@ sudo systemctl restart nginx
 ## 🔐 **5. Attach EC2 Role for ECR Access**
 
 ### 🎯 **Create IAM Policy: EC2ECRPullPolicy**
+
 ```json
 {
   "Version": "2012-10-17",
@@ -88,12 +96,15 @@ sudo systemctl restart nginx
   ]
 }
 ```
+
 Attach this policy to an **EC2 Role**, and attach that role to your EC2 instance.
 
 ---
 
 ## 👤 **6. Create IAM User for GitHub Access**
+
 ### 🔐 **Create IAM Policy: GitHubECRPushPolicy**
+
 ```json
 {
   "Version": "2012-10-17",
@@ -119,107 +130,50 @@ Attach this policy to an **EC2 Role**, and attach that role to your EC2 instance
   ]
 }
 ```
-- Attach this policy to an **IAM User**
-- Generate **Access Key ID** and **Secret Key** for GitHub Secrets
+
+* Attach this policy to an **IAM User**
+* Generate **Access Key ID** and **Secret Key** for GitHub Secrets
 
 ---
 
-## 🧪 **7. GitHub Actions Workflow**
+## 🧪 **7. GitHub Workflows Overview**
 
-### `.github/workflows/deploy.yml`
-```yaml
-name: Build and Deploy Next.js App via ECR
+### 🔄 `release.yml`: Semantic Release (Triggered on push to `main` or `dev`)
 
-on:
-  push:
-    branches:
-      - main
-      - dev
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Build, tag, and push Docker image
-        env:
-          ECR_REPO: ${{ secrets.ECR_REPO }}
-        run: |
-          IMAGE_TAG=latest
-          docker build -t $ECR_REPO:$IMAGE_TAG .
-          docker push $ECR_REPO:$IMAGE_TAG
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
-      - name: Add SSH key
-        run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" > key.pem
-          chmod 600 key.pem
-
-      - name: Deploy on EC2
-        run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF
-            set -e
-            export AWS_REGION="${{ secrets.AWS_REGION }}"
-            export IMAGE_TAG="${{ env.IMAGE_TAG }}"
-            export ECR_REPO="${{ secrets.ECR_REPO }}"
-
-            aws ecr get-login-password --region \$AWS_REGION | docker login --username AWS --password-stdin \$ECR_REPO
-
-            cd ${{ secrets.APP_DIR }}
-
-            echo "⏮️ Backing up current container..."
-            if docker inspect nextjs-app &> /dev/null; then
-              docker commit nextjs-app nextjs-app:backup || true
-            fi
-
-            echo "⬇️ Pulling new image..."
-            docker pull \$ECR_REPO:\$IMAGE_TAG
-
-            echo "🚀 Running new container..."
-            docker stop nextjs-app || true
-            docker rm nextjs-app || true
-
-            docker run -d --name nextjs-app -p 3000:3000 \$ECR_REPO:\$IMAGE_TAG || {
-              echo "❌ Deployment failed! Rolling back..."
-              docker run -d --name nextjs-app -p 3000:3000 nextjs-app:backup
-            }
-          EOF
-```
+> ✅ View this in the actual file: `.github/workflows/release.yml`
 
 ---
 
-## 🔐 **8. Add GitHub Secrets**
+### 🚀 `deploy.yml`: Build + Deploy to EC2 (Triggered on push to `main`, `dev`, `aws`, but only deploys if release is from `main`)
 
-| Secret Name           | Description                                |
-|------------------------|--------------------------------------------|
-| `AWS_ACCESS_KEY_ID`    | From IAM user                              |
-| `AWS_SECRET_ACCESS_KEY`| From IAM user                              |
-| `AWS_REGION`           | e.g. `ap-south-1`                          |
-| `ECR_REPO`             | Full ECR repo URI                          |
-| `EC2_HOST`             | EC2 Public IP                              |
-| `EC2_USER`             | Usually `ubuntu`                           |
-| `EC2_SSH_KEY`          | EC2 `.pem` file contents as string         |
-| `APP_DIR`              | Path where app is hosted (e.g., `/var/www/html`) |
+> ✅ View this in the actual file: `.github/workflows/deploy.yml`
+
+---
+
+## 🔐 **8. GitHub Secrets**
+
+| Secret Name                                      | Description                                |
+| ------------------------------------------------ | ------------------------------------------ |
+| `AWS_ACCESS_KEY_ID`                              | From IAM user                              |
+| `AWS_SECRET_ACCESS_KEY`                          | From IAM user                              |
+| `AWS_REGION`                                     | e.g. `ap-south-1`                          |
+| `ECR_REPO`                                       | Full ECR repo URI                          |
+| `EC2_HOST`                                       | EC2 Public IP                              |
+| `EC2_USER`                                       | Usually `ubuntu`                           |
+| `EC2_SSH_KEY`                                    | EC2 `.pem` file contents as string         |
+| `APP_DIR`                                        | Path where app is hosted (`/var/www/html`) |
+| `NEXT_PUBLIC_API_BASE_URL`                       | Frontend API Base URL                      |
+| `NEXT_PUBLIC_LOCALSTORAGE_ENCRYPTION_SECRET_KEY` | Secret key used in frontend storage        |
 
 ---
 
 ## ✅ Done!
 
-Now, every push to `main` or `dev` will:
-1. Build the Docker image.
-2. Push to Amazon ECR with the `latest` tag.
-3. SSH into EC2 and deploy the new container.
-4. If deployment fails, auto-rollback to the previous image.
+Now, every push to `main` will:
+
+1. Run semantic release.
+2. Build the Docker image with the new tag.
+3. Push to ECR.
+4. SSH into EC2.
+5. Pull & run new container.
+6. Rollback if failure occurs.
