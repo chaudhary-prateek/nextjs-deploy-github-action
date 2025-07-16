@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      always_run:
+        required: false
+        type: boolean
+        default: false
+      run_on_branch:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: inputs.always_run || github.ref == format('refs/heads/{0}', inputs.run_on_branch) # Run if always_run is true OR branch matches
+
+    steps:
+      - name: 🧾 Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Set up PNPM
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: 🟢 Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20.x"
+          cache: "pnpm"
+
+      - name: 📥 Install dependencies
+        run: pnpm install
+
+      - name: 🚀 Run Semantic Release
+        id: semantic_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
