@@ -18,16 +18,46 @@ jobs:
     runs-on: ubuntu-latest
     needs: [release]
 
+    if: github.ref == 'refs/heads/main' # ✅ Only run on main branch
+
     steps:
+            # ✅ Fetching Latest Release from git repo using API
+      - name: Get latest release via API
+        run: |
+          RELEASE_DATA=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+          IMAGE_TAG=$(echo "$RELEASE_DATA" | jq -r '.tag_name')
+          
+          if [ "$IMAGE_TAG" = "null" ] || [ -z "$IMAGE_TAG" ]; then
+            echo "❌ No releases found"
+            exit 1
+          fi
+          
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "✅ Found release tag: $IMAGE_TAG"
+
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: ${{ env.IMAGE_TAG }}  # ✅ Checkout specific tag  
+          fetch-depth: 0
 
-      - name: Get latest GitHub release tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify deployment source
         run: |
-          IMAGE_TAG=$(gh release view --json tagName -q .tagName)
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "✅ Deploying from tag: ${{ env.IMAGE_TAG }}"
+          echo "✅ Commit hash: $(git rev-parse HEAD)"
+          echo "✅ Tag verification: $(git describe --tags --exact-match)"
+          
+#      - name: Checkout code
+#        uses: actions/checkout@v3
+
+#      - name: Get latest GitHub release tag
+#        env:
+#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#        run: |
+#          IMAGE_TAG=$(gh release view --json tagName -q .tagName)
+#          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
